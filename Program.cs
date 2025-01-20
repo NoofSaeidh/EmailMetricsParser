@@ -3,7 +3,7 @@ using Serilog.Events;
 using Serilog.Formatting.Compact.Reader;
 using System;
 
-string logFile = "c:\\temp\\metric2.clef";
+string logFile = "C:\\temp\\metrics 1.clef";
 
 using var clef = File.OpenText(logFile);
 
@@ -19,21 +19,50 @@ while (reader.TryRead(out var evt))
 
 metrics.Sort((l, r) => l.Timestamp.CompareTo(r.Timestamp));
 
-var incomingBatchProcessed = metrics.Where(m => m.Operation == Operations.IncomingEmailsBatchProcessed).ToList();
+const string format1 = "{0} Average (divided by count): {1} ± {2}. Max: {3}. Min: {4}. Total count: {5}";
+const string format2 = "{0} Average: {1} ± {2}. Max: {3}. Min: {4}. Total count: {5}";
 
-var calcedTimes = incomingBatchProcessed.Where(m => m.Parameters?.Count > 0).Select(m => m.Elapsed.TotalSeconds / m.Parameters!.Count).ToList();
+Log(Operations.IncomingEmailsBatchProcessed, format1);
+Log(Operations.OutgoingEmailsBatchSent, format1);
+Log(Operations.SingleIncomingEmailProcessed, format2);
+Log(Operations.SingleIncomingEmailRead, format2);
+Log(Operations.SingleOutgoingEmailSent, format2);
 
-// average
-var avg = calcedTimes.Average();
+void Log(string operation, string messageFormat)
+{
+    var data = CalcTimes(metrics, operation);
+    if (data == default)
+        return;
+    Console.WriteLine(messageFormat, operation, data.Average, data.StandardDeviation, data.Max, data.Min, data.Count);
+}
 
-var avgTs = TimeSpan.FromSeconds(avg);
 
-// standard deviation
-var sd = Math.Sqrt(calcedTimes.Average(v => Math.Pow(v - avg, 2)));
+static (TimeSpan Average, TimeSpan StandardDeviation, TimeSpan Max, TimeSpan Min, int Count) CalcTimes(IEnumerable<Metric> metrics_, string operation)
+{
+    var times = metrics_.Where(m => m.Operation == operation).Select(m =>
+    {
+        if (m.Parameters?.Count is { } count) return m.Elapsed.TotalSeconds / count;
+        return m.Elapsed.TotalSeconds;
+    }).ToList();
 
-var sdTs = TimeSpan.FromSeconds(sd);
+    if (times.Count == 0)
+        return default;
 
-Console.WriteLine($"{Operations.IncomingEmailsBatchProcessed}: {avgTs} ± {sdTs}");
+    // average
+    var avg = times.Average();
+
+    var avgTs = TimeSpan.FromSeconds(avg);
+
+    // standard deviation
+    var sd = Math.Sqrt(times.Average(v => Math.Pow(v - avg, 2)));
+
+    var sdTs = TimeSpan.FromSeconds(sd);
+
+    var max = TimeSpan.FromSeconds(times.Max());
+    var min = TimeSpan.FromSeconds(times.Min());
+
+    return (avgTs, sdTs, max, min, times.Count);
+}
 
 
 static Metric? TryParseMetric(LogEvent evt)
